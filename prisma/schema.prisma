@@ -1,0 +1,391 @@
+// =====================================================================
+// La Schiscetta - Nutrizione di Precisione (Cagliari)
+// Schema Prisma per PostgreSQL (Supabase)
+// - url:       connection pooler (porta 6543, pgbouncer) per il runtime
+// - directUrl: connessione diretta/session (porta 5432) per db push/migrate
+// Nota: i campi strutturati sono memorizzati come stringhe JSON e
+//       (de)serializzati in src/lib/json.ts
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ----------------------------- AZIENDA ------------------------------
+
+model CompanyInfo {
+  id           String   @id @default("main")
+  legalName    String   @default("La Schiscetta S.r.l.")
+  brandName    String   @default("La Schiscetta")
+  tagline      String   @default("Nutrizione di Precisione")
+  vatNumber    String?  // P.IVA (11 cifre, validazione con checksum)
+  taxCode      String?  // Codice fiscale
+  sdiCode      String?  // Codice destinatario SDI (7 caratteri alfanumerici)
+  pec          String?
+  street       String   @default("Via Roma")
+  streetNumber String   @default("100")
+  zip          String   @default("09124")
+  city         String   @default("Cagliari")
+  province     String   @default("CA")
+  country      String   @default("IT")
+  lat          Float    @default(39.2172)
+  lng          Float    @default(9.114)
+  phone        String?
+  mobile       String?
+  whatsapp     String?
+  emailInfo    String?
+  emailOrders  String?
+  emailPrivacy String?
+  emailAdmin   String?
+  cciaa        String?  // Iscrizione Camera di Commercio Cagliari
+  reaNumber    String?  // Numero REA
+  shareCapital String?
+  dpoName      String?
+  dpoEmail     String?
+  dpoPhone     String?
+  instagram    String?
+  facebook     String?
+  tiktok       String?
+  linkedin     String?
+  gbpId        String?  // Google Business Profile ID
+  iban         String?  // Bonifici catering
+  logoUrl      String?
+  heroUrl      String?
+  aboutUrl     String?
+  // JSON: [{day:"Lunedì", open:"09:00", close:"20:30", closed:false}]
+  openingHours String   @default("[]")
+  // JSON: festività italiane e sarde [{date:"04-28", name:"Sa Die de sa Sardigna"}]
+  holidays     String?  @default("[]")
+  updatedAt    DateTime @updatedAt
+}
+
+// --------------------------- UTENTI ADMIN ----------------------------
+// RBAC: SUPERADMIN | MANAGER | EDITOR | VIEWER
+
+model AdminUser {
+  id             String    @id @default(cuid())
+  username       String    @unique
+  email          String    @unique
+  passwordHash   String    // argon2id (64MB, 3 iterazioni, parallelismo 1)
+  role           String    @default("VIEWER")
+  totpSecretEnc  String?   // segreto TOTP cifrato AES-256-GCM a riposo
+  totpEnabled    Boolean   @default(false)
+  backupCodesEnc String?   // JSON [{sha256}] cifrato AES-256-GCM
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  lastLoginAt    DateTime?
+  lastLoginIp    String?
+  sessionVersion Int       @default(0) // revoca remota delle sessioni
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// ----------------------------- CLIENTI -------------------------------
+
+model Customer {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  nameEnc       String?  // nome cifrato AES-256-GCM a riposo
+  phoneEnc      String?  // telefono cifrato AES-256-GCM a riposo
+  dailyKcal     Int      @default(2000)
+  dailyProteinG Int      @default(120)
+  goal          String?  // cut | mantenimento | bulk
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  orders        Order[]
+}
+
+// ------------------------------ MENU ---------------------------------
+
+model MenuItem {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  nameIt        String   // max 60 char
+  nameEn        String   // max 60 char
+  descIt        String   // max 500 char
+  descEn        String   // max 500 char
+  category      String   // Plates | Smoothies | Colazione | Gelato | Grab & Go | Bevande | Caffe | Platters
+  imageUrl      String?
+  pricePer100g  Float    // EUR, range 0,50 - 25,00
+  unitWeightG   Int      @default(300)
+  // valori nutrizionali per 100g
+  kcal          Float
+  proteinG      Float
+  fatG          Float
+  carbG         Float
+  fiberG        Float
+  // JSON: ingredienti in ordine decrescente di quantità (Reg. UE 1169/2011)
+  ingredientsIt String   @default("[]")
+  ingredientsEn String   @default("[]")
+  // JSON: codici dei 14 allergeni UE obbligatori (campo obbligatorio, anche [])
+  allergens     String   @default("[]")
+  // JSON: GF | V | VG | P | PESCO | LACTOSE_FREE | KETO | HALAL | KOSHER
+  dietTags      String   @default("[]")
+  // JSON: id degli add-in funzionali disponibili
+  addInIds      String   @default("[]")
+  // claim nutrizionale SOLO da registro EFSA autorizzato (Reg. UE 1924/2006)
+  healthClaim   String?
+  available     Boolean  @default(true)
+  // JSON: giorni di disponibilità [1..6,0] (lun-dom)
+  availableDays String   @default("[1,2,3,4,5,6,0]")
+  seasonalFrom  String?  // "MM-DD"
+  seasonalTo    String?  // "MM-DD"
+  isPopular     Boolean  @default(false)
+  isSignature   Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+  @@index([available])
+}
+
+// --------------------------- ADD-IN EFSA -----------------------------
+
+model AddIn {
+  id        String  @id @default(cuid())
+  key       String  @unique // creatina | collagene | lions-mane | probiotici
+  nameIt    String
+  nameEn    String
+  descIt    String
+  descEn    String
+  price     Float   // maggiorazione fissa in EUR
+  // Solo claim autorizzati EFSA (Reg. UE 1924/2006); stringa vuota = nessun claim
+  efsaClaim String?
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+}
+
+// ------------------------------ ORDINI -------------------------------
+
+model Order {
+  id            String    @id @default(cuid())
+  orderNumber   String    @unique // SCH-AAAAMMDD-XXXX
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  // PII cifrato AES-256-GCM a riposo
+  nameEnc       String
+  emailEnc      String
+  phoneEnc      String?
+  addressEnc    String?
+  fulfillment   String    @default("RITIRO") // RITIRO | CONSEGNA
+  zone          String?   // zona di consegna (Cagliari)
+  // JSON: righe ordine con prezzi ricalcolati SERVER-SIDE (mai dal client)
+  items         String
+  subtotal      Float
+  deliveryFee   Float     @default(0)
+  discount      Float     @default(0)
+  couponCode    String?
+  total         Float
+  paymentMethod String    @default("STRIVE_TEST") // STRIPE_TEST | IN_NEGOZIO
+  paymentStatus String    @default("IN_ATTESA")  // IN_ATTESA | PAGATO | RIMBORSATO | FALLITO
+  status        String    @default("RICEVUTO")   // RICEVUTO | IN_PREPARAZIONE | PRONTO | CONSEGNATO | ANNULLATO
+  // JSON: riepilogo nutrizionale aggregato {kcal,proteinG,fatG,carbG,fiberG}
+  nutritionSummary String  @default("{}")
+  ipHash        String?   // hash anonimo per anti-frode, non identificabile
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ------------------------------ COUPON -------------------------------
+
+model Coupon {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  type      String    // PERCENT | FIXED
+  value     Float
+  minOrder  Float     @default(0)
+  maxUses   Int?
+  usedCount Int       @default(0)
+  validFrom DateTime  @default(now())
+  validTo   DateTime?
+  active    Boolean   @default(true)
+}
+
+// --------------------------- ZONE DELIVERY ---------------------------
+
+model DeliveryZone {
+  id        String  @id @default(cuid())
+  name      String  // Centro Storico, Marina, Stampace, Villanova, Poetto...
+  fee       Float   // costo consegna EUR
+  minOrder  Float   @default(0)
+  etaMinutes Int    @default(30)
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+}
+
+// ----------------------- CATERING / CONTATTI -------------------------
+
+model CateringRequest {
+  id        String   @id @default(cuid())
+  nameEnc   String   // cifrato AES-256-GCM
+  emailEnc  String
+  phoneEnc  String?
+  company   String?
+  eventType String?  // evento | ufficio | altro
+  guests    Int      @default(10)
+  date      String?  // data richiesta (ISO)
+  message   String
+  status    String   @default("NUOVA") // NUOVA | CONTATTATA | PREVENTIVO | CONFERMATA | CHIUSA
+  createdAt DateTime @default(now())
+
+  @@index([status])
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String?
+  message   String
+  status    String   @default("NUOVA")
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------- NEWSLETTER -----------------------------
+// Doppio opt-in GDPR: conferma tramite token monouso
+
+model NewsletterSubscriber {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  confirmToken String?   // token monouso (hash)
+  confirmedAt  DateTime?
+  unsubToken   String    @unique
+  lang         String    @default("it")
+  createdAt    DateTime  @default(now())
+}
+
+// ------------------------------ BLOG ---------------------------------
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  excerpt     String
+  content     String   // markdown
+  coverUrl    String?
+  author      String   @default("Team La Schiscetta")
+  category    String   @default("Nutrizione")
+  readMinutes Int      @default(4)
+  published   Boolean  @default(true)
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// --------------------------- RECENSIONI ------------------------------
+
+model Review {
+  id      String   @id @default(cuid())
+  author  String
+  rating  Int
+  text    String
+  source  String   @default("Google")
+  date    DateTime @default(now())
+  visible Boolean  @default(true)
+}
+
+// ------------------------- CONSENSI COOKIE ---------------------------
+// Registro del consenso ai sensi del Provvedimento Garante 231/2021.
+// Conservazione: 12 mesi. Nessun dato identificativo: solo hash giornaliero.
+
+model ConsentRecord {
+  id            String   @id @default(cuid())
+  visitorHash   String   // HMAC(ip+UA+giorno) - non identificabile
+  necessary     Boolean  @default(true)
+  analytics     Boolean  @default(false)
+  marketing     Boolean  @default(false)
+  policyVersion String   @default("1.0")
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime // +12 mesi
+
+  @@index([createdAt])
+}
+
+// --------------------------- ANALYTICS -------------------------------
+// GDPR by design: solo se l'utente ha acconsentito (il client non invia
+// nulla senza consenso). IP anonimizzato, nessuno user ID persistente,
+// conservazione massima 24 mesi.
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  type        String   @default("pageview") // pageview | event
+  path        String
+  title       String?
+  visitorHash String   // pseudonimo giornaliero
+  referrer    String?  // sorgente normalizzata (direct/organic/social/referral/paid)
+  device      String   @default("desktop") // desktop | mobile | tablet
+  browser     String?
+  os          String?
+  region      String?  // solo livello regione (mai città singola)
+  name        String?  // nome evento custom
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([path])
+}
+
+// ---------------------------- AUDIT LOG ------------------------------
+// Log immutabile: ogni azione admin registrata con payload pre/post.
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actorName String
+  action    String   // CREATE | UPDATE | DELETE | LOGIN | LOGIN_FAILED | MFA_...
+  entity    String?  // MenuItem | Order | CompanyInfo | Policy | ...
+  entityId  String?
+  before    String?  // JSON payload pre-modifica
+  after     String?  // JSON payload post-modifica
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity])
+}
+
+// ----------------------- POLICY E COOKIE TABLE -----------------------
+
+model PrivacyPolicy {
+  id        String  @id @default("main")
+  // JSON: [{id, title, body}] - sezioni predefinite GDPR
+  sections  String  @default("[]")
+  version   Int     @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+model PolicyVersion {
+  id         String   @id @default(cuid())
+  type       String   // PRIVACY | COOKIE
+  version    Int
+  sections   String   // JSON
+  changeNote String?
+  authorName String
+  createdAt  DateTime @default(now())
+
+  @@index([type])
+}
+
+model CookieDefinition {
+  id       String  @id @default(cuid())
+  name     String
+  provider String
+  purpose  String
+  duration String
+  category String  // TECNICI | ANALITICI_1P | ANALITICI_3P | PROFILAZIONE
+  required Boolean @default(false) // cookie tecnici essenziali
+  active   Boolean @default(true)  // attivabile solo con consenso
+  sortOrder Int   @default(0)
+}
