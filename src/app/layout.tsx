@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -69,13 +70,20 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // CSP nonce-based: la lettura di headers() rende il route DINAMICO
+  // (obbligatorio: un nonce prerenderizzato statico non coinciderebbe
+  // mai con quello generato dal middleware ad ogni richiesta) e Next.js
+  // preleva il nonce dalla CSP nei request headers applicandolo ai
+  // propri tag <script> inline.
+  const nonce = (await headers()).get("x-nonce");
+
   return (
-    <html lang="it" suppressHydrationWarning>
+    <html lang="it" suppressHydrationWarning data-nonce-ready={nonce ? "1" : "0"}>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

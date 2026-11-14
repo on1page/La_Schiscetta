@@ -1,16 +1,16 @@
 // =====================================================================
 // middleware.ts - Security headers globali (OWASP A05)
-// CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy.
-// In sviluppo Next.js richiede unsafe-eval/unsafe-inline per HMR;
-// in produzione la CSP è nonce-based e restrittiva (spec 5.3).
+// CSP nonce-based in produzione: il nonce viene INOLTRATO al server
+// Next.js tramite i REQUEST headers; Next lo applica ai propri
+// <script> inline (payload RSC/hydration). La stessa CSP va anche
+// nella RESPONSE per il browser.
 // =====================================================================
 import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const res = NextResponse.next();
   const isDev = process.env.NODE_ENV !== "production";
 
-  // Nonce generato ad ogni richiesta server-side (Web Crypto, Edge-safe)
+  // Nonce generato ad ogni richiesta (Web Crypto, Edge-safe)
   const nonceBytes = new Uint8Array(16);
   crypto.getRandomValues(nonceBytes);
   const nonce = Array.from(nonceBytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -26,7 +26,6 @@ export function middleware(req: NextRequest) {
     "img-src 'self' https: data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    // mappa OpenStreetMap (embed senza cookie, GDPR-friendly)
     "frame-src https://www.openstreetmap.org",
     "frame-ancestors 'none'",
     "form-action 'self'",
@@ -36,6 +35,14 @@ export function middleware(req: NextRequest) {
     "manifest-src 'self'",
     "upgrade-insecure-requests",
   ].join("; ");
+
+  // IL FIX: inoltra nonce e CSP al server Next.js (request headers),
+  // così li applica ai propri tag <script> inline.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("content-security-policy", csp);
+
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
 
   res.headers.set("Content-Security-Policy", csp);
   res.headers.set("X-Content-Type-Options", "nosniff");
@@ -53,14 +60,11 @@ export function middleware(req: NextRequest) {
   res.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   res.headers.set("X-Permitted-Cross-Domain-Policies", "none");
 
-  // il nonce è reso disponibile a Next per firmare i propri script
-  res.headers.set("x-nonce", nonce);
   return res;
 }
 
 export const config = {
   matcher: [
-    // tutti tranne asset statici
     "/((?!_next/static|_next/image|favicon.ico|logo.svg|icon.png).*)",
   ],
 };
